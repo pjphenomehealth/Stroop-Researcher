@@ -1,0 +1,455 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stroop Researcher Mirror</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .screen-mirror { transition: opacity 0.5s ease-in-out; }
+        .hidden { display: none; }
+        .control-btn {
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            color: white;
+            transition: background-color 0.2s;
+            cursor: pointer;
+        }
+        .btn-start { background-color: #22c55e; } /* green-500 */
+        .btn-start:hover { background-color: #16a34a; } /* green-600 */
+        .btn-stop { background-color: #ef4444; } /* red-500 */
+        .btn-stop:hover { background-color: #dc2626; } /* red-600 */
+        .btn-reset { background-color: #64748b; } /* slate-500 */
+        .btn-reset:hover { background-color: #475569; } /* slate-600 */
+        .btn-next { background-color: #4f46e5; } /* indigo-600 */
+        .btn-next:hover { background-color: #4338ca; } /* indigo-700 */
+        .info-box {
+            border-left: 4px solid #e5e7eb; /* gray-200 */
+            padding-left: 1rem;
+            margin-top: 1.5rem;
+            text-align: left;
+        }
+        .info-box h3 {
+            font-weight: 700;
+            color: #4b5563; /* gray-600 */
+            margin-bottom: 0.5rem;
+        }
+        .info-box p, .info-box li {
+            color: #4b5563; /* gray-600 */
+        }
+        .script-text {
+            background-color: #f3f4f6; /* gray-100 */
+            border-left: 4px solid #6366f1; /* indigo-500 */
+            padding: 1rem;
+            font-style: italic;
+            border-radius: 0.25rem;
+            white-space: pre-wrap;
+        }
+        .stroop-word {
+             font-weight: 900;
+             letter-spacing: 0.1em;
+        }
+        #progressBar-mirror {
+            transition: width 1.5s linear;
+        }
+    </style>
+</head>
+<body class="bg-gray-800 flex items-center justify-center min-h-screen p-4">
+
+    <div id="main-content" class="w-full">
+        <div id="app-container" class="bg-white p-6 sm:p-10 rounded-2xl shadow-2xl max-w-5xl w-full text-center relative transition-all duration-500 mx-auto">
+            
+            <!-- Session Input Screen -->
+            <div id="sessionInput" class="screen-mirror">
+                <h1 class="text-4xl font-extrabold text-gray-800 mb-4">Stroop Researcher Mirror</h1>
+                <p class="text-gray-600 mb-6">Enter the 6-character Session ID from the participant's screen to connect.</p>
+                <div class="flex justify-center items-center gap-4">
+                    <input type="text" id="sessionIdField" maxlength="6" class="form-input text-center text-2xl font-mono uppercase w-48 px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                    <button id="connectBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-lg text-lg shadow-lg transform hover:scale-105 transition-transform" onclick="connectToSession()">Connect</button>
+                </div>
+                <p id="error-message" class="text-red-500 mt-4 font-semibold h-6"></p>
+            </div>
+
+            <!-- Mirror View Container -->
+            <div id="mirror-view" class="hidden">
+                <div id="session-id-display" class="absolute top-6 left-6 bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg"></div>
+                <div id="next-screen-container" class="absolute top-6 right-6"></div>
+
+                <!-- All Mirror Screens -->
+                <div id="welcome-mirror" class="screen-mirror hidden"></div>
+                <div id="preBaselineSurvey-mirror" class="screen-mirror hidden"></div>
+                <div id="baseline-mirror" class="screen-mirror hidden"></div>
+                <div id="instructions-mirror" class="screen-mirror hidden"></div>
+                <div id="practice-mirror" class="screen-mirror hidden"></div>
+                <div id="challengeInstructions-mirror" class="screen-mirror hidden"></div>
+                <div id="colorTest-mirror" class="screen-mirror hidden"></div>
+                <div id="blockComplete-mirror" class="screen-mirror hidden"></div>
+                <div id="postTaskSurvey-mirror" class="screen-mirror hidden"></div>
+                <div id="meal-mirror" class="screen-mirror hidden"></div>
+                <div id="complete-mirror" class="screen-mirror hidden"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase -->
+    <script type="module" defer>
+        import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, setDoc, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+        
+        let db, auth;
+        let unsubscribe = null;
+        let currentSessionId = null;
+        let currentGameState = {};
+        let firebaseInitialized = false;
+        let heartbeatInterval = null;
+
+        const screenConfig = {
+            'welcome': { 
+                next: 'preBaselineSurvey', 
+                title: 'Introduction & Pre-Test',
+                participantSees: "Participant is at the welcome screen.",
+                script: `"I'm going to be administering your challenge today as part of your participation in the BETA Pilot study. The purpose of this test is to better understand the association between stress and blood glucose levels. Before we begin, I'd like to confirm a few things. Firstly, could you please ensure that your Google Meet window is expanded to full screen? Can you hear and see me well?\n\nThis challenge should take approximately 30 minutes and thereafter you'll be expected to consume the (e.g., [see challenge tracker for type of beverage]) beverage provided to you and will have to refrain from exercise activities for 90 minutes. Ideally, you stay seated for this time. Do you still have adequate time this morning to complete this full procedure?\n\nDo you have the provided beverage nearby, ready to consume?\n\nYou are expected to fast for 10 hours prior to this challenge, and reduce stress-inducing activities prior to. Were you able to fast? Is there anything you did this morning that you want to mention that involved strenuous exercise, or a stressful exposure?\n\nPlease put your phone on silent for the duration of this procedure, and avoid looking at or checking your phone unless instructed by me.\n\nLastly, could you confirm that you are wearing all of your study devices. This includes the Empatica EmbracePlus, the Oura ring, and the CGM. Are the devices all charged and working?"`,
+                actions: ["Document how well the participant was able to follow the pre-challenge instructions and any deviations from these instructions (e.g., if they didn't fast, what did they consume and when?).", `<strong>RC Script:</strong> "I'm sending you a link by email and posting it here in the video-conference chat."`, `<strong>RC Script:</strong> "Please open it in a new window making sure you can see me and the challenge website."`, `<strong>RC Script:</strong> "Let me know when it loads, and wait for my next instructions."`, "Post/email link. Confirm the participant is on the welcome screen.", `<strong>RC Script:</strong> "Today, I will be able to monitor everything you do on this website. In order to track your screen and progress, I need you to share the session ID with me. You should see a small blue bubble in the lower-left corner labeled 'Session ID.' Please read that Session ID aloud."`, "Help locate the ID if needed and enter it in this portal."]
+            },
+            'preBaselineSurvey': { 
+                next: 'baseline', 
+                title: 'Stress Log',
+                participantSees: "Participant is being asked to log their stress level.",
+                script: `"Next I'm going to ask you to rate your current stress levels using the scale provided on the screen. Please log your response by opening your study app and adding your response to the I've Noticed.. feature labelling your entry as Stress 0= [answer]."`,
+                actions: ["Confirm the stress rating is logged.", `<strong>RC Script:</strong> "Now press the blue "Next" button"`, "Ensure the Resting Baseline screen appears."]
+            },
+            'baseline': { 
+                next: 'instructions', 
+                title: 'Resting Baseline', 
+                participantSees: "Participant sees a 3-minute timer and instructions to relax.", 
+                hasTimer: true, 
+                timerDefault: '3:00',
+                script: `"Relax, clear your mind, and remain still and quiet for three minutes. I'll step away, but keep your microphone and camera on so we can monitor."`,
+                actions: ["Use the timer controls to Start, Stop, and Reset the baseline timer.", "Turn off RC camera/mic; remain off-screen while monitoring."]
+            },
+            'instructions': { 
+                next: 'practice', 
+                title: 'Instructions',
+                participantSees: "Participant is reading the instructions for the color response test.",
+                script: `"You've completed the resting baseline. Next, read the on-screen instructions and work through the practice session."\n\n"After you finish the practice, stop before proceeding and let me know. Wait for further instructions."`,
+                actions: ["When the timer ends, turn RC camera/mic back on.", "Wait for participant to read instructions and click 'Start Practice'."]
+            },
+            'practice': {
+                next: 'challengeInstructions', 
+                title: 'Practice Session',
+                participantSees: "Participant is completing the interactive practice session.",
+                script: ``, // No script, just monitoring
+                actions: ["Monitor participant as they complete the practice.", "Wait for them to click 'Begin Color Response Test'."]
+            },
+            'challengeInstructions': {
+                next: 'colorTest',
+                title: 'Competition & Challenge Instructions',
+                participantSees: "Participant is reading the instructions for the competitive blocks.",
+                script: `"You'll now compete against a simulated opponent. Your goal is to finish each trial as fast and as accurately as possible."\n\n"There are three rounds. After each round you'll see a performance summary; review it briefly, then begin the next round."\n\n"You will have three opportunities to beat your opponent"`,
+                actions: ["Confirm the challenge begins after you start the first block."]
+            },
+            'colorTest': { 
+                next: 'blockComplete', 
+                title: 'Stroop Challenge', 
+                participantSees: "Participant is actively completing a Stroop block.",
+                hasTimer: true,
+                timerDefault: '3:00',
+                script: ``, // No script, just monitoring
+                actions: ["Confirm each round begins; monitor performance throughout all three blocks."]
+            },
+            'blockComplete': {
+                title: 'Block Complete',
+                participantSees: "Participant is viewing their performance summary.",
+                script: ``, // No script
+                actions: ["Review performance summary with participant if needed."]
+            },
+            'postTaskSurvey': { 
+                next: 'meal', 
+                title: 'Post-Task Stress Log',
+                participantSees: "Participant is being asked to log their stress level again.",
+                script: `"That concludes today's tasks.\n\nI'm going to ask you to again rate your current level of stress using the I've noticed.. feature in the study app using the label Stress 1= [Answer]."`,
+                actions: ["Wait for participants to complete I've noticed entry.", `<strong>RC Script:</strong> "Now that you have finished logging your stress please press the blue "Next" Button"`]
+            },
+            'meal': { 
+                next: 'complete', 
+                title: 'Post-Task Meal', 
+                participantSees: "Participant sees a 5-minute timer and instructions to consume the beverage.", 
+                hasTimer: true, 
+                timerDefault: '5:00',
+                script: `"You now have five minutes to drink your provided liquid meal."`,
+                actions: ["Instruct participant to click 'Start Meal Timer'.", "Observe participant during consuming meal until timer reaches 00:00."],
+                context: "The participant needs to drink the entire beverage within 5 minutes. You can explain or express the significance of this if they are taking longer than usual. Drinks should also not be consumed in too short a time. Aim for approximately 5 minutes across all participants."
+            },
+            'complete': { 
+                next: null, 
+                title: 'Debrief & Close',
+                participantSees: "Participant sees the 'Protocol Complete' screen.",
+                script: `"Thank you for completing today's tasks. For the next 90 mins, until approximately [END_TIME], please stay seated as much as possible and avoid food, beverages, and strenuous or stressful activity. After that 90 min period, you may resume your normal routine. If your blood sugar falls out of range, either below 70 mg/dL or above 250 mg/dL, please treat as needed and contact the study coordinator. Do you have any questions before we end?"`,
+                actions: ["Stop recording, end video call.", "If Final Challenge: Complete a debrief (Appendix B)."]
+            }
+        };
+
+        async function initializeFirebase() {
+            if (firebaseInitialized) return;
+            firebaseInitialized = true;
+            try {
+                const firebaseConfig = {apiKey: "AIzaSyAY-vUFdaTXQR9-B9tPFeQNgUd2CHdEBJ8", authDomain: "stroop-comp.firebaseapp.com", projectId: "stroop-comp", storageBucket: "stroop-comp.firebasestorage.app", messagingSenderId: "832246150640", appId: "1:832246150640:web:e35225f1dd629fa9335935"};
+                const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('error');
+                if (!auth.currentUser) {
+                    await signInAnonymously(auth);
+                }
+            } catch (e) {
+                console.error("Firebase initialization failed:", e);
+                const mainContent = document.getElementById('main-content');
+                if (mainContent) {
+                    mainContent.innerHTML = `<div class="bg-white p-8 rounded-lg shadow-xl max-w-2xl mx-auto text-center"><h1 class="text-2xl font-bold text-red-600">Error: Could not connect to the server.</h1><p class="text-gray-600 mt-2">There was a problem initializing the connection to the database. Please check your internet connection and try again.</p><p class="text-xs text-gray-400 mt-4">Details: ${e.message}</p></div>`;
+                }
+            }
+        }
+
+        initializeFirebase();
+
+        function sendCommand(command) {
+            if (!currentSessionId) return;
+            const appId = "stroop-comp";
+            const sessionRef = doc(db, `artifacts/${appId}/public/data/sessions`, currentSessionId);
+            const commandWithId = { ...command, commandId: crypto.randomUUID(), issuedAt: serverTimestamp() };
+            setDoc(sessionRef, { command: commandWithId }, { merge: true });
+        }
+        window.sendCommand = sendCommand;
+
+        function startHeartbeat() {
+            stopHeartbeat(); // Ensure no multiple intervals are running
+            heartbeatInterval = setInterval(() => {
+                if (currentSessionId) {
+                    const appId = "stroop-comp";
+                    const sessionRef = doc(db, `artifacts/${appId}/public/data/sessions`, currentSessionId);
+                    setDoc(sessionRef, { researcherHeartbeat: serverTimestamp() }, { merge: true });
+                }
+            }, 30000); // Send an update every 30 seconds
+        }
+
+        function stopHeartbeat() {
+            clearInterval(heartbeatInterval);
+        }
+
+        window.connectToSession = () => {
+            const sessionId = document.getElementById('sessionIdField').value.trim().toUpperCase();
+            const errorEl = document.getElementById('error-message');
+            const appId = "stroop-comp"; 
+            if (sessionId.length !== 6) { errorEl.textContent = 'Please enter a valid 6-character Session ID.'; return; }
+            errorEl.textContent = 'Connecting...';
+            if (unsubscribe) unsubscribe();
+            stopHeartbeat();
+
+            currentSessionId = sessionId;
+            const sessionRef = doc(db, `artifacts/${appId}/public/data/sessions`, sessionId);
+            
+            unsubscribe = onSnapshot(sessionRef, (doc) => {
+                if (doc.exists()) {
+                    if (!heartbeatInterval) {
+                        startHeartbeat();
+                    }
+                    errorEl.textContent = '';
+                    document.getElementById('sessionInput').style.display = 'none';
+                    document.getElementById('mirror-view').style.display = 'block';
+                    renderState(doc.data());
+                } else {
+                    errorEl.textContent = `Session "${sessionId}" not found. Please check the ID.`;
+                    document.getElementById('sessionInput').style.display = 'block';
+                    document.getElementById('mirror-view').style.display = 'none';
+                    stopHeartbeat();
+                }
+            }, (error) => {
+                console.error("Snapshot error:", error);
+                errorEl.textContent = "Error connecting to the session.";
+                stopHeartbeat();
+            });
+        }
+        
+        function renderState(newState) {
+            const oldState = currentGameState;
+            currentGameState = newState;
+
+            const screenChanged = newState.screenId !== oldState.screenId;
+            const practiceChanged = JSON.stringify(newState.practice) !== JSON.stringify(oldState.practice);
+            const preStressChanged = newState.stressResponsePre !== oldState.stressResponsePre;
+            const postStressChanged = newState.stressResponsePost !== oldState.stressResponsePost;
+            const endTimeChanged = newState.endTimeString !== oldState.endTimeString;
+
+            if (screenChanged || 
+                (newState.screenId === 'practice' && practiceChanged) ||
+                (newState.screenId === 'preBaselineSurvey' && preStressChanged) ||
+                (newState.screenId === 'postTaskSurvey' && postStressChanged) ||
+                (newState.screenId === 'complete' && endTimeChanged)) {
+                
+                document.querySelectorAll('.screen-mirror').forEach(el => el.classList.add('hidden'));
+                const currentScreenEl = document.getElementById(`${newState.screenId}-mirror`);
+                if (currentScreenEl) {
+                    currentScreenEl.innerHTML = getScreenHtml(newState);
+                    currentScreenEl.classList.remove('hidden');
+                }
+            }
+            
+            updateDynamicContent(newState);
+            
+            document.getElementById('session-id-display').innerHTML = `Mirroring Session: <span class="font-bold">${newState.sessionId || ''}</span>`;
+            
+            const config = screenConfig[newState.screenId] || {};
+            const nextScreenContainer = document.getElementById('next-screen-container');
+            nextScreenContainer.innerHTML = ''; // Clear previous button
+
+            if (newState.screenId === 'blockComplete') {
+                const nextBlockNum = (newState.currentBlock || 0) + 1;
+                if (nextBlockNum <= 3) {
+                    nextScreenContainer.innerHTML = `<button class="control-btn btn-next" onclick="sendCommand({type: 'startBlock', blockNum: ${nextBlockNum}})">Start Block ${nextBlockNum}</button>`;
+                } else {
+                    nextScreenContainer.innerHTML = `<button class="control-btn btn-next" onclick="sendCommand({type: 'screen', screenId: 'postTaskSurvey'})">Go to Stress Log</button>`;
+                }
+            } else if (newState.screenId === 'challengeInstructions') {
+                 nextScreenContainer.innerHTML = `<button class="control-btn btn-next" onclick="sendCommand({type: 'startBlock', blockNum: 1})">Start Round 1</button>`;
+            } else if (config.next && newState.screenId !== 'practice' && newState.screenId !== 'instructions') {
+                nextScreenContainer.innerHTML = `<button class="control-btn btn-next" onclick="sendCommand({type: 'screen', screenId: '${config.next}'})">Next: ${screenConfig[config.next].title}</button>`;
+            }
+        }
+
+        function updateDynamicContent(state) {
+            const timerValue = state.timer?.value;
+            const timerEl = document.querySelector(`#${state.screenId}-mirror .timer-display`);
+            if (timerEl && timerEl.textContent !== timerValue) {
+                timerEl.textContent = timerValue;
+            }
+
+            const isRunning = state.timer?.running;
+            const startBtn = document.querySelector(`#${state.screenId}-mirror .btn-start`);
+            const stopBtn = document.querySelector(`#${state.screenId}-mirror .btn-stop`);
+            if(startBtn) startBtn.classList.toggle('hidden', isRunning);
+            if(stopBtn) stopBtn.classList.toggle('hidden', !isRunning);
+
+            if (state.screenId === 'colorTest' && state.block) {
+                const { block } = state;
+                document.getElementById('colorWord-mirror').textContent = block.word;
+                document.getElementById('colorWord-mirror').style.color = block.color;
+                document.getElementById('wrong-mirror').textContent = block.wrongCount || 0;
+            }
+            if (state.screenId === 'blockComplete' && state.blockComplete) {
+                const { user, competitor } = state.blockComplete;
+                document.getElementById('blockCorrect-mirror').textContent = user.correct;
+                document.getElementById('blockWrong-mirror').textContent = user.wrong;
+                document.getElementById('blockAccuracy-mirror').textContent = user.accuracy;
+                document.getElementById('competitorCorrect-mirror').textContent = competitor.correct;
+                document.getElementById('competitorWrong-mirror').textContent = competitor.wrong;
+                document.getElementById('competitorAccuracy-mirror').textContent = competitor.accuracy;
+            }
+        }
+
+        function getSurveyHtml(title, response) {
+            let responseHtml;
+            if (response) {
+                responseHtml = `
+                    <div class="mt-6 p-4 bg-green-100 border-2 border-green-300 rounded-lg text-left">
+                        <h4 class="font-bold text-green-800 text-lg">Participant's Stress Response:</h4>
+                        <p class="text-2xl text-green-900 font-semibold">${response}</p>
+                    </div>
+                `;
+            } else {
+                 responseHtml = `
+                    <div class="mt-6 p-4 bg-yellow-100 border-2 border-yellow-300 rounded-lg text-left">
+                        <p class="text-yellow-800 font-semibold">Waiting for participant to select a stress level...</p>
+                    </div>
+                `;
+            }
+
+            return `<div class="max-w-4xl mx-auto text-left space-y-4">
+                        <h2 class="text-3xl font-bold text-gray-800 mb-6 text-center">Participant is Logging Stress Level (${title})</h2>
+                        ${responseHtml}
+                    </div>`;
+        }
+
+        function getScreenHtml(state) {
+            const screenId = state.screenId;
+            
+            if (screenId === 'preBaselineSurvey') return getSurveyHtml('Before Task', state.stressResponsePre);
+            if (screenId === 'postTaskSurvey') return getSurveyHtml('After Task', state.stressResponsePost);
+
+            const config = JSON.parse(JSON.stringify(screenConfig[screenId])); // Deep copy to prevent mutation
+            if (!config) return '<div>Error: Screen configuration not found.</div>';
+            
+            if (screenId === 'complete') {
+                const endTimeString = state.endTimeString || '(participant local time)';
+                config.script = config.script.replace('[END_TIME]', endTimeString);
+            }
+
+            const isRunning = state.timer && state.timer.running;
+            const timerControls = config.hasTimer ? `
+                <div class="flex justify-center items-center gap-4 mt-6">
+                    <button class="control-btn btn-start ${isRunning ? 'hidden' : ''}" onclick="sendCommand({type: 'timer', action: 'start'})">Start Timer</button>
+                    <button class="control-btn btn-stop ${!isRunning ? 'hidden' : ''}" onclick="sendCommand({type: 'timer', action: 'stop'})">Stop Timer</button>
+                    <button class="control-btn btn-reset" onclick="sendCommand({type: 'timer', action: 'reset'})">Reset Timer</button>
+                </div>` : '';
+
+            const contextHtml = config.context ? `<div class="info-box mt-4"><h3>Context</h3><p class="text-sm">${config.context}</p></div>` : '';
+            
+            let mainContent = '';
+            if (screenId === 'practice') {
+                 const practice = state.practice || {};
+                 let practiceMirrorHtml = '';
+                 if (practice.isComplete) {
+                     practiceMirrorHtml = `<p class="font-bold text-indigo-600">Participant has completed the practice.</p>`;
+                 } else if (practice.isVisualExample) {
+                     practiceMirrorHtml = `<p class="font-bold text-gray-500 mt-4">Participant is viewing an example.</p>`;
+                 } else {
+                     practiceMirrorHtml = `
+                        <div class="stroop-word text-6xl my-4" style="color: ${practice.color || 'transparent'}">${practice.word || ''}</div>
+                        <div class="text-2xl font-bold h-10 my-4 ${practice.feedback === 'Correct' ? 'text-green-500' : 'text-red-500'}">${practice.feedback || ''}</div>`;
+                 }
+                 mainContent = `<div class="max-w-4xl mx-auto">
+                    <div class="instructions text-gray-600 mb-4 mx-auto min-h-[10rem] flex items-center justify-center p-4">
+                        <div id="practiceInstruction-mirror">${practice.instruction || ''}</div>
+                    </div>
+                    ${practiceMirrorHtml}
+                </div>`;
+            } else if (screenId === 'colorTest') {
+                mainContent = `<div class="max-w-4xl mx-auto">
+                        <div id="colorTimer-mirror" class="text-5xl font-mono font-bold my-2 text-gray-700 timer-display">${state.timer?.value || config.timerDefault}</div>
+                        <div id="colorWord-mirror" class="stroop-word text-7xl my-8"></div>
+                        <div class="absolute bottom-4 right-4 text-red-500 text-xl font-bold">Wrong: <span id="wrong-mirror">0</span></div>
+                    </div>`;
+            } else if (screenId === 'blockComplete') {
+                 mainContent = `<div class="max-w-4xl mx-auto"><div class="flex flex-col sm:flex-row justify-around items-center gap-6"><div class="border-4 border-red-400 bg-red-50 p-6 rounded-2xl w-full sm:w-auto shadow-lg"><p class="text-red-600 font-bold text-xl uppercase mb-2">❌ Participant's Score ❌</p><p>Correct: <span id="blockCorrect-mirror" class="font-bold text-green-600"></span> | Wrong: <span id="blockWrong-mirror" class="font-bold text-red-600"></span></p><p class="text-2xl mt-2 font-bold">Accuracy: <span id="blockAccuracy-mirror" class="text-red-600"></span>%</p></div><div class="border-4 border-green-400 bg-green-50 p-6 rounded-2xl w-full sm:w-auto shadow-lg"><p class="text-green-600 font-bold text-xl uppercase mb-2">🏆 Competitor Score 🏆</p><p>Correct: <span id="competitorCorrect-mirror" class="font-bold text-green-600"></span> | Wrong: <span id="competitorWrong-mirror" class="font-bold text-red-600"></span></p><p class="text-2xl mt-2 font-bold">Accuracy: <span id="competitorAccuracy-mirror" class="text-green-600"></span>%</p></div></div></div>`;
+            } else if (screenId === 'complete') {
+                 mainContent = `<div class="max-w-4xl mx-auto"><h1 class="text-5xl font-extrabold text-green-600 mb-4">Protocol Complete</h1><div class="text-gray-700 text-lg mb-4 bg-indigo-50 p-6 rounded-lg"><p>Thank you for your participation. Please remember to avoid food, beverages (other than water), and strenuous or stressful activity until:</p><p id="endTimeDisplay-mirror" class="text-4xl font-bold text-indigo-600 my-4">${state.endTimeString || ''}</p></div><p class="text-gray-600">Participant may now close this page.</p></div>`;
+            } else if (config.hasTimer) {
+                 mainContent = `<div class="text-8xl font-mono font-bold my-4 text-gray-800 timer-display">${state.timer?.value || config.timerDefault}</div>`;
+            }
+
+            const sopContent = (config.script || (config.actions && config.actions.length > 0)) ? `
+                <div class="info-box">
+                    ${config.script ? `<h3>Researcher Script</h3><div class="script-text mb-4">${config.script}</div>` : ''}
+                    ${(config.actions && config.actions.length > 0) ? `<h3>RC Instructions</h3><ul class="list-disc list-inside space-y-1">${config.actions.map(a => `<li>${a}</li>`).join('')}</ul>` : ''}
+                    ${contextHtml}
+                </div>` : '';
+
+            return `
+                <div class="max-w-4xl mx-auto pt-12">
+                    <h2 class="text-3xl font-bold text-gray-800 mb-2">${config.title}</h2>
+                    <p class="text-gray-500 mb-6">${config.participantSees}</p>
+                    ${mainContent}
+                    ${timerControls}
+                    ${sopContent}
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
